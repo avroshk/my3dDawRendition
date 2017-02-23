@@ -46,7 +46,7 @@ public:
     ofCylinderPrimitive trackCylinder;
 
     TimeLine time;
-    float current_time;
+    float current_time, song_length;
     string beats;
 
     int numTracks = 6;
@@ -61,6 +61,8 @@ public:
     //AUDIO
     void audioIn(float * input, int bufferSize, int nChannels);
     ofSoundStream soundStream;
+    int audioInBufferSkip = 6;
+    int audioInBufferCount = 0;
     
     vector <float> fftData;
     vector <float> left1,right1,fftL1,fftR1;
@@ -80,9 +82,16 @@ public:
     ofxButton stopButton;
     ofxToggle lockAbleton;
     ofxPanel gui;
+    ofxIntSlider timeResolution;
+    ofxIntSlider audioSkipDistance;
     
     void playButtonPressed();
     void stopButtonPressed();
+    void changeTimeRes(int &timeResolution);
+    void changeDrawingRes(int &circleResolution);
+    
+    //events
+    void abletonStateChanged();
     
 private:
 //    ofVec2f polarPoint;

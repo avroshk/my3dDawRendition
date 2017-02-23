@@ -10,7 +10,16 @@
 #include "ofMain.h"
 #include <math.h>
 
+bool TrackCylinder::isPlaying = false;
+int TrackCylinder::timeDistanceInPixels = 30;
 
+void TrackCylinder::setTimeDistanceInPixels(int pix) {
+    timeDistanceInPixels = pix;
+}
+
+void TrackCylinder::setIsPlaying(bool playing) {
+    isPlaying = playing;
+}
 ////--------------------------------------------------------------
 //TrackCylinder::TrackCylinder() {
 //    
@@ -37,17 +46,28 @@ void TrackCylinder::setup(float r, float theta, string name){
 //    trackAxis.addVertex(trackPos.x,-height/2,trackPos.y);
 //    trackAxis.addVertex(trackPos.x,height/2,trackPos.y);
     
-    
     initRandomSpectrogram();
+    
+    fftBoundaryL = new ofPolyline[numPastFrames];
+    fftBoundaryR = new ofPolyline[numPastFrames];
+    fftBoundaryDraw = new ofPath[numPastFrames];
+
+    
 //    setupPastFrames(numPastFrames);
     drawSpectrogram(0, tick); //draw 0th instance
 }
 
 //--------------------------------------------------------------
 void TrackCylinder::initRandomSpectrogram(){
-    for (int j=0; j<numPastFrames; j++) {
-        for (int i=0; i<fftSize/2; ++i) {
-            if (j==0) {
+    
+    spectrogramBlock = new float* [numPastFrames];
+    for (int i=0; i< numPastFrames; i++) {
+        spectrogramBlock[i] = new float [fftSize/2];
+    }
+    
+    for (int i=0; i<numPastFrames; ++i) {
+        for (int j=0; j<fftSize/2; ++j) {
+            if (i==0) {
                 spectrogramBlock[i][j] = ofRandom(0.0,10.0);
             } else {
                 spectrogramBlock[i][j] = 0.0;
@@ -56,6 +76,22 @@ void TrackCylinder::initRandomSpectrogram(){
     }
     
     initialI = ofRandom(0.0,1.0)*180;
+}
+
+void TrackCylinder::clear() {
+    cout<<"Clearing tracks"<<endl;
+    
+    
+    for (int i=0; i< numPastFrames; i++) {
+        delete [] spectrogramBlock[i];
+    }
+    delete [] spectrogramBlock;
+    
+    delete [] fftBoundaryL;
+    delete [] fftBoundaryR;
+    delete [] fftBoundaryDraw;
+    
+    appExited = true;
 }
 
 int TrackCylinder::getPrevTick(int index = -1) {
@@ -85,49 +121,46 @@ void TrackCylinder::incrementTick() {
 //--------------------------------------------------------------
 void TrackCylinder::updateSpectrogram(vector <float> spectrogram, bool drawPastFrames){
     
-    
-    float max = 0.0;
-    for (int i=0; i<fftSize/2; ++i) {
-        if (spectrogram[i] > max) {
-            max = spectrogram[i];
+    if (!appExited) {
+        float max = 0.0;
+        for (int i=0; i<fftSize/2; ++i) {
+            if (spectrogram[i] > max) {
+                max = spectrogram[i];
+            }
         }
-    }
-    
-    if (max < 0.000001) {
-        max = 0.0001;
-    }
-    
-    int prevTick = getPrevTick();
-    
-    //Normalize to 0-90
-    for (int i=0; i<fftSize/2; ++i) {
         
-        if (spectrogramBlock[i][prevTick] > spectrogramBlock[i][tick]) {
-            //Release state
-            spectrogramBlock[i][tick] = (1 - releaseAlpha) * spectrogramBlock[i][tick];
+        if (max < 0.000001) {
+            max = 0.0001;
+        }
+        
+        int prevTick = getPrevTick();
+        
+        //Normalize to 0-90
+        for (int i=0; i<fftSize/2; ++i) {
+            
+            if (spectrogramBlock[prevTick][i] > spectrogramBlock[tick][i]) {
+                //Release state
+                spectrogramBlock[tick][i] = (1 - releaseAlpha) * spectrogramBlock[tick][i];
+            } else {
+                //Attack state
+                spectrogramBlock[tick][i] = attackAlpha * spectrogram[i]*8/max + (1 - attackAlpha) * spectrogramBlock[prevTick][i];
+            }
+            
+            spectrogramBlock[prevTick][i] = spectrogramBlock[tick][i];
+        }
+        
+        incrementTick();
+        
+        //    setupPastFrames(numPastFrames);
+        
+        if (drawPastFrames) {
+            for (int i=0; i< numPastFrames-1; i++) {
+                drawSpectrogram(i, prevTick);
+                prevTick = getPrevTick(prevTick);
+            }
         } else {
-            //Attack state
-            spectrogramBlock[i][tick] = releaseAlpha * spectrogram[i]*8/max + (1 - releaseAlpha) * spectrogramBlock[i][prevTick];
+            drawSpectrogram(0,tick);
         }
-        
-        spectrogramBlock[i][prevTick] = spectrogramBlock[i][tick];
-    }
-    
-    incrementTick();
-
-//    for (int i=0; i<fftSize/2; ++i) {
-//        spectrogramBlock[i] = 10*(spectrogram[i]);
-//    }
-//
-//    setupPastFrames(numPastFrames);
-    
-    if (drawPastFrames) {
-        for (int i=0; i< numPastFrames-1; i++) {
-            drawSpectrogram(i, prevTick);
-            prevTick = getPrevTick(prevTick);
-        }
-    } else {
-        drawSpectrogram(0,tick);
     }
 }
 
@@ -163,7 +196,6 @@ void TrackCylinder::update(ofVec2f mousePointer, ofCamera *cam){
 //--------------------------------------------------------------
 void TrackCylinder::draw(){
     trackCylinder.setPosition(trackPos.x,0,trackPos.y);
-    trackCylinder.draw();
     
 //    ofDrawBitmapString(trackName, trackPos.x,20+(height/2),trackPos.y);
 
@@ -174,9 +206,15 @@ void TrackCylinder::draw(){
         controlSphere.draw();
     }
     
-    for (int j=0; j<numPastFrames-1; j++) {
+    for (int j=0; j<numPastFrames; j++) {
         fftBoundaryDraw[j].draw();
     }
+    if (!isPlaying) {
+        trackCylinder.set(radius, height);
+    } else {
+        trackCylinder.set(radius/2, height);
+    }
+    trackCylinder.draw();
 }
 
 bool TrackCylinder::isFocussed(ofVec2f mousePointer, ofCamera *cam) {
@@ -192,236 +230,52 @@ bool TrackCylinder::isFocussed(ofVec2f mousePointer, ofCamera *cam) {
     return drawPanControl;
 }
 
+
 void TrackCylinder::drawSpectrogram(int pastFrameNum, int currentTick) {
-    
-    fftBoundaryR[pastFrameNum].clear();
-    fftBoundaryL[pastFrameNum].clear();
-    fftBoundaryDraw[pastFrameNum].clear();
-    
-    int k = 0;
-    float angle = 0;
-    
-    for (float i=0; i<height; i=i+height/128) {
-        angle = spectrogramBlock[k++][currentTick]; //demoday
-
-        specBoundR = utils.polarToCartesian(distRadius+pastFrameNum*100, panAngle+angle);
+    if (!appExited) {
+        fftBoundaryR[pastFrameNum].clear();
+        fftBoundaryL[pastFrameNum].clear();
+        fftBoundaryDraw[pastFrameNum].clear();
         
-        specBoundL = utils.polarToCartesian(distRadius+pastFrameNum*100, panAngle-angle);
+        int k = 0;
+        float angle = 0;
         
-        fftBoundaryR[pastFrameNum].addVertex(specBoundR.x,(i-height/2)+0*100,specBoundR.y);
-        fftBoundaryL[pastFrameNum].addVertex(specBoundL.x,(i-height/2)+0*100,specBoundL.y);
+        for (float i=0; i<height; i=i+height/128) {
+            angle = spectrogramBlock[currentTick][k++]; //demoday
+            
+            specBoundR = utils.polarToCartesian(distRadius+pastFrameNum*timeDistanceInPixels, panAngle+angle);
+            
+            specBoundL = utils.polarToCartesian(distRadius+pastFrameNum*timeDistanceInPixels, panAngle-angle);
+            
+            fftBoundaryR[pastFrameNum].addVertex(specBoundR.x,(i-height/2),specBoundR.y);
+            fftBoundaryL[pastFrameNum].addVertex(specBoundL.x,(i-height/2),specBoundL.y);
+        }
+        
+        trackPos1 = utils.polarToCartesian(distRadius+pastFrameNum*timeDistanceInPixels, panAngle);
+        
+        verticesR = fftBoundaryR[pastFrameNum].getSmoothed(10).getVertices();
+        verticesL = fftBoundaryL[pastFrameNum].getSmoothed(10).getVertices();
+        
+        fftBoundaryDraw[pastFrameNum].moveTo(trackPos1.x,(-height/2),trackPos1.y);
+        
+        for (int i=0; i<verticesR.size(); i++) {
+            fftBoundaryDraw[pastFrameNum].lineTo(verticesR[i]);
+        }
+        
+        fftBoundaryDraw[pastFrameNum].lineTo(trackPos1.x,(height/2),trackPos1.y);
+        
+        for (int i=verticesL.size()-1; i>=0; --i) {
+            fftBoundaryDraw[pastFrameNum].lineTo(verticesL[i]);
+        }
+        
+        fftBoundaryDraw[pastFrameNum].lineTo(trackPos1.x,(-height/2),trackPos1.y);
+        fftBoundaryDraw[pastFrameNum].close();
+        
+        fftBoundaryDraw[pastFrameNum].setFillColor(ofFloatColor(R,G,B,0.6-(pastFrameNum*0.6/numPastFrames)));
+        
+        fftBoundaryDraw[pastFrameNum].setFilled(true);
     }
-    
-    trackPos1 = utils.polarToCartesian(distRadius+pastFrameNum*100, panAngle);
-    
-    verticesR = fftBoundaryR[pastFrameNum].getSmoothed(10).getVertices();
-    verticesL = fftBoundaryL[pastFrameNum].getSmoothed(10).getVertices();
-    
-    fftBoundaryDraw[pastFrameNum].moveTo(trackPos1.x,(-height/2)+0*100,trackPos1.y);
-    
-    for (int i=0; i<verticesR.size(); i++) {
-        fftBoundaryDraw[pastFrameNum].lineTo(verticesR[i]);
-    }
-    
-    fftBoundaryDraw[pastFrameNum].lineTo(trackPos1.x,(height/2)+0*100,trackPos1.y);
-    
-    for (int i=verticesL.size()-1; i>=0; --i) {
-        fftBoundaryDraw[pastFrameNum].lineTo(verticesL[i]);
-    }
-    
-    fftBoundaryDraw[pastFrameNum].lineTo(trackPos1.x,(-height/2)+0*100,trackPos1.y);
-    fftBoundaryDraw[pastFrameNum].close();
-    
-    fftBoundaryDraw[pastFrameNum].setFillColor(ofFloatColor(R,G,B,0.6-(pastFrameNum*0.06)));
-    
-    fftBoundaryDraw[pastFrameNum].setFilled(true);
 }
 
-/*
-void TrackCylinder::setupPastFrames(int numFrames) {
-    
-    for (int n=0; n<numFrames; n++) {
-        fftBoundaryR[n].clear();
-        fftBoundaryL[n].clear();
-        fftBoundaryDraw[n].clear();
-    }
-    
-//    float tempRandomValue = 0.0;
-    
-    int k = 0;
-    float angle = 0;
-    for (float i=0; i<height; i=i+height/128) {
-//        tempRandomValue = ofRandom(0.0,10.0);
-//        tempRandomValue = spectrogramBlock[k++];
-//        angle = tempRandomValue*(sin((initialI+i)*pi/180)+sin(pi/2));
-        
-        angle = spectrogramBlock[k++]; //demoday
-        
-        for (int j=0; j<numFrames; j++) {
-            
-            if (j==0) {
-                spectrogramBoundaryR[j] = utils.polarToCartesian(distRadius+j*100, panAngle+angle);
-                
-                spectrogramBoundaryL[j] = utils.polarToCartesian(distRadius+j*100, panAngle-angle);
-                
-                fftBoundaryR[j].addVertex(spectrogramBoundaryR[j].x,(i-height/2)+j*100,spectrogramBoundaryR[j].y);
-                fftBoundaryL[j].addVertex(spectrogramBoundaryL[j].x,(i-height/2)+j*100,spectrogramBoundaryL[j].y);
-            } else {
-                spectrogramBoundaryR[j] = utils.polarToCartesian(distRadius+j*100+1000, panAngle+angle);
-                
-                spectrogramBoundaryL[j] = utils.polarToCartesian(distRadius+j*100+1000, panAngle-angle);
-                
-                fftBoundaryR[j].addVertex(spectrogramBoundaryR[j].x,(i-height/2)+j*100-200,spectrogramBoundaryR[j].y);
-                fftBoundaryL[j].addVertex(spectrogramBoundaryL[j].x,(i-height/2)+j*100-200,spectrogramBoundaryL[j].y);
-            }
-            
-        }
-    }
-    
-    for (int j=0; j<numFrames; j++) {
-        
-        
-        if (j==0) {
-            trackPos = utils.polarToCartesian(distRadius+j*100, panAngle);
-            
-            verticesR = fftBoundaryR[j].getSmoothed(1).getVertices();
-            verticesL = fftBoundaryL[j].getSmoothed(1).getVertices();
-            
-            fftBoundaryDraw[j].moveTo(trackPos.x,(-height/2)+j*100,trackPos.y);
-            
-            for (int i=0; i<verticesR.size(); i++) {
-                fftBoundaryDraw[j].lineTo(verticesR[i]);
-            }
-            
-            fftBoundaryDraw[j].lineTo(trackPos.x,(height/2)+j*100,trackPos.y);
-            
-            for (int i=verticesL.size()-1; i>=0; --i) {
-                fftBoundaryDraw[j].lineTo(verticesL[i]);
-            }
-            
-            fftBoundaryDraw[j].lineTo(trackPos.x,(-height/2)+j*100,trackPos.y);
-            fftBoundaryDraw[j].close();
-            
-            fftBoundaryDraw[j].setFillColor(ofFloatColor(R,G,B,0.6-(j*0.06)));
-        } else {
-            trackPos = utils.polarToCartesian(distRadius+j*100+1000, panAngle);
-            
-            verticesR = fftBoundaryR[j].getSmoothed(1).getVertices();
-            verticesL = fftBoundaryL[j].getSmoothed(1).getVertices();
-            
-            fftBoundaryDraw[j].moveTo(trackPos.x,(-height/2)+j*100-200,trackPos.y);
-            
-            for (int l=0; l<verticesR.size(); l++) {
-                fftBoundaryDraw[j].lineTo(verticesR[l]);
-            }
-            
-            fftBoundaryDraw[j].lineTo(trackPos.x,(height/2)+j*100-200,trackPos.y);
-            
-            for (int l=verticesL.size()-1; l>=0; --l) {
-                fftBoundaryDraw[j].lineTo(verticesL[l]);
-            }
-            
-            fftBoundaryDraw[j].lineTo(trackPos.x,(-height/2)+j*100-200,trackPos.y);
-            fftBoundaryDraw[j].close();
-            
-            fftBoundaryDraw[j].setFillColor(ofFloatColor(1.0,1.0,1.0,0.6-(j*0.06)));
-        }
-        
-        fftBoundaryDraw[j].setFilled(true);
-    }
-}
-*/
 
 
-/*
-void TrackCylinder::setupPastFrames(int numFrames) {
-    
-    for (int n=0; n<numFrames; n++) {
-        fftBoundaryR[n].clear();
-        fftBoundaryL[n].clear();
-        fftBoundaryDraw[n].clear();
-    }
-    
-    float tempRandomValue = 0.0;
-    
-    int k = 0;
-    float angle = 0;
-    for (float i=0; i<height; i=i+height/128) {
-        tempRandomValue = ofRandom(0.0,10.0);
-        angle = tempRandomValue*(sin((initialI+i)*pi/180)+sin(pi/2));
-//        angle = spectrogramBlock[k++]; //demoday
-        
-        for (int j=0; j<numFrames; j++) {
-            
-            if (j==0) {
-                spectrogramBoundaryR[j] = utils.polarToCartesian(distRadius+j*100, panAngle+angle);
-                
-                spectrogramBoundaryL[j] = utils.polarToCartesian(distRadius+j*100, panAngle-angle);
-                
-                fftBoundaryR[j].addVertex(spectrogramBoundaryR[j].x,(i-height/2)+j*100,spectrogramBoundaryR[j].y);
-                fftBoundaryL[j].addVertex(spectrogramBoundaryL[j].x,(i-height/2)+j*100,spectrogramBoundaryL[j].y);
-            } else {
-                spectrogramBoundaryR[j] = utils.polarToCartesian(distRadius+j*100+1000, angle);
-                
-                spectrogramBoundaryL[j] = utils.polarToCartesian(distRadius+j*100+1000, -angle);
-                
-                fftBoundaryR[j].addVertex(spectrogramBoundaryR[j].x,(i-height/2)+j*100+1000,spectrogramBoundaryR[j].y);
-                fftBoundaryL[j].addVertex(spectrogramBoundaryL[j].x,(i-height/2)+j*100+1000,spectrogramBoundaryL[j].y);
-            }
-            
-        }
-    }
-    
-    for (int j=0; j<numFrames; j++) {
-        
-        
-        if (j==0) {
-            trackPos = utils.polarToCartesian(distRadius+j*100, panAngle);
-            
-            verticesR = fftBoundaryR[j].getSmoothed(5).getVertices();
-            verticesL = fftBoundaryL[j].getSmoothed(5).getVertices();
-            
-            fftBoundaryDraw[j].moveTo(trackPos.x,(-height/2)+j*100,trackPos.y);
-            
-            for (int i=0; i<verticesR.size(); i++) {
-                fftBoundaryDraw[j].lineTo(verticesR[i]);
-            }
-            
-            fftBoundaryDraw[j].lineTo(trackPos.x,(height/2)+j*100,trackPos.y);
-            
-            for (int i=verticesL.size()-1; i>=0; --i) {
-                fftBoundaryDraw[j].lineTo(verticesL[i]);
-            }
-            
-            fftBoundaryDraw[j].lineTo(trackPos.x,(-height/2)+j*100,trackPos.y);
-            fftBoundaryDraw[j].close();
-            
-            fftBoundaryDraw[j].setFillColor(ofFloatColor(R,G,B,0.6-(j*0.06)));
-        } else {
-            trackPos = utils.polarToCartesian(distRadius+j*100+1000, panAngle);
-            
-            verticesR = fftBoundaryR[j].getSmoothed(5).getVertices();
-            verticesL = fftBoundaryL[j].getSmoothed(5).getVertices();
-            
-            fftBoundaryDraw[j].moveTo(trackPos.x,(-height/2)+j*100+1000,trackPos.y);
-            
-            for (int l=0; l<verticesR.size(); l++) {
-                fftBoundaryDraw[j].lineTo(verticesR[l]);
-            }
-            
-            fftBoundaryDraw[j].lineTo(trackPos.x,(height/2)+j*100+1000,trackPos.y);
-            
-            for (int l=verticesL.size()-1; l>=0; --l) {
-                fftBoundaryDraw[j].lineTo(verticesL[l]);
-            }
-            
-            fftBoundaryDraw[j].lineTo(trackPos.x,(-height/2)+j*100+1000,trackPos.y);
-            fftBoundaryDraw[j].close();
-            
-            fftBoundaryDraw[j].setFillColor(ofFloatColor(1.0,1.0,1.0,0.6-(j*0.06)));
-        }
-        
-        fftBoundaryDraw[j].setFilled(true);
-    }
-}
- */

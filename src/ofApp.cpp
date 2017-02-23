@@ -100,6 +100,7 @@ void ofApp::setup(){
     
     soundStream.setup(this, 0, numChannels, sampleRate, bufferSize, 4);
     
+
     
     //Timeline setup
     time.setup(sampleRate,bufferSize);
@@ -107,12 +108,21 @@ void ofApp::setup(){
     //GUI Setup
     playButton.addListener(this, &ofApp::playButtonPressed);
     stopButton.addListener(this, &ofApp::stopButtonPressed);
+    timeResolution.addListener(this, &ofApp::changeTimeRes);
+    audioSkipDistance.addListener(this, &ofApp::changeDrawingRes);
     
     gui.setup(); // most of the time you don't need a name
     gui.add(lockAbleton.setup("Lock", false));
     gui.add(playButton.setup("Play"));
     gui.add(stopButton.setup("Stop"));
+    gui.add(timeResolution.setup("time res", 30, 1, 200));
+    gui.add(audioSkipDistance.setup("drawing res", 6, 2, 20));
     
+    //Init OSC messages
+    ofxOscMessage m;
+    m.setAddress("/live/song/length");
+    sender.sendMessage(m);
+
 }
 
 
@@ -122,20 +132,29 @@ void ofApp::update(){
         ofxOscMessage m;
         receive.getNextMessage(&m);
         
-        /// TODO: Split these into functions
-        for (int i=1; i<=numTracks; i++) {
-            if (m.getAddress() == "/pan/track"+std::to_string(i)) {
-                oscPan[i-1] = m.getArgAsFloat(0);
-            } else if(m.getAddress() == "/transport/beats") {
-                beats = m.getArgAsString(0);
-                time.updateCurrentMeasure(beats);
-            } else if(m.getAddress() == "/live/time") {
-                current_time = m.getArgAsFloat(0);
-            }
-            
+        /// TODO: move global  OSC messages into a function
+        if(m.getAddress() == "/live/song/length") {
+            song_length = m.getArgAsFloat(0);
+            cout<<song_length<<endl;
+        } else if(m.getAddress() == "/live/beats") {
+            beats = m.getArgAsString(0);
+            time.updateCurrentMeasure(beats);
+        } else if(m.getAddress() == "/live/time") {
+            current_time = m.getArgAsFloat(0);
+        } else if(m.getAddress() == "/live/tracks") {
+            cout<<"tracks: "<<m.getArgAsInt(0)<<endl;
         }
+        
+        /// TODO: MOve track based OSC messages into a function
+//        for (int i=1; i<=numTracks; i++) {
+//            if (m.getAddress() == "/live/pan") {
+////                cout<<"Pan :"<<m.getArgAsInt(0)<<" "<<m.getArgAsFloat(1);
+////                oscPan[i-1] = m.getArgAsFloat(0);
+//            }
+//            
+//        }
     }
-    time.moveTimeline();
+//    time.moveTimeline();
 }
 
 //--------------------------------------------------------------
@@ -144,19 +163,19 @@ void ofApp::draw(){
     ofEnableAlphaBlending();
     ofSetColor(pixelColor,pixelColor,pixelColor,pixelColor);
    
-    
     ofEnableLighting();
     light.enable();
 
     cam.begin();
     light.draw();
     
+    //TODO: Temporary - get rid of this later
     ofDrawAxis(100);
     
-    // draw the outer sphere
+    // draw the outer sophere
     material.begin();
     ofNoFill();
-//    ofFill();
+    // ofFill();
     ofDrawSphere(0, 0, infiniteLength);
     material.end();
     
@@ -169,7 +188,7 @@ void ofApp::draw(){
 
     planeL.draw();
     planeR.draw();
-    
+//    
     tracks[0].draw();
     tracks[1].draw();
     tracks[2].draw();
@@ -189,7 +208,7 @@ void ofApp::draw(){
     ofDrawBitmapString("Beats: " + beats, 0, 10);
     ofDrawBitmapString("Time: " + std::to_string(current_time), 0, 30);
     
-     ofDrawBitmapString("Lows", utils.polarToCartesian(800,-135).x, -330, utils.polarToCartesian(800,-135).y);
+    ofDrawBitmapString("Lows", utils.polarToCartesian(800,-135).x, -330, utils.polarToCartesian(800,-135).y);
     
     ofPushMatrix();
     ofRotateX(90);  // <- rotate the circle around the z axis by some amount.
@@ -204,7 +223,6 @@ void ofApp::draw(){
     ofPopMatrix();
     cam.end();
     
-
 
     
     ofDrawBitmapString("3d Daw Rendition", 20, 20);
@@ -227,12 +245,8 @@ void ofApp::keyPressed(int key){
         case OF_KEY_DOWN: cam.tilt(kRotInc); break;
         case 'q': {
                 ofxOscMessage m;
-                m.setAddress("/ableton/free");
-                if (lockAbleton) {
-                    m.addInt32Arg(0);
-                } else {
-                    m.addInt32Arg(1);
-                }
+                m.setAddress("/live/tracks");
+                m.addStringArg("query");
                 sender.sendMessage(m);
                 break;
             }
@@ -287,8 +301,9 @@ void ofApp::mouseReleased(int x, int y, int button){
     for (int i=0 ; i<numTracks; i++) {
         if (trackHoverTracker[i]) {
             tracks[i].update(ofVec2f(x,y), &cam);
-            m.setAddress("/pan/track"+std::to_string(i));
-            m.addInt32Arg(tracks[i].panAngle+90);
+            m.setAddress("/live/pan");
+            m.addInt32Arg(i);
+            m.addFloatArg(ofMap(tracks[i].panAngle+90,-60,60,-1.0f,1.0f));
             sender.sendMessage(m);
         }
     }
@@ -312,8 +327,17 @@ void ofApp::windowResized(int w, int h){
 
 //--------------------------------------------------------------
 void ofApp::exit(){
+    stopButtonPressed();
     playButton.removeListener(this, &ofApp::playButtonPressed);
     stopButton.removeListener(this, &ofApp::stopButtonPressed);
+    
+    tracks[0].clear();
+    tracks[1].clear();
+    tracks[2].clear();
+    tracks[3].clear();
+    tracks[4].clear();
+    tracks[5].clear();
+    
 }
 
 //--------------------------------------------------------------
@@ -341,81 +365,100 @@ void ofApp::setBrightTheme(bool setBright){
 void ofApp::playButtonPressed(){
     ofxOscMessage m;
     
-//    m.setAddress("/transport/play");
     m.setAddress("/live/play");
-    m.addInt32Arg(1);
     sender.sendMessage(m);
+    
+    TrackCylinder::setIsPlaying(true);
+    
 }
 
 //--------------------------------------------------------------
 void ofApp::stopButtonPressed(){
     ofxOscMessage m;
 
-    m.setAddress("/transport/stop");
-    m.addInt32Arg(1);
+    m.setAddress("/live/stop");
     sender.sendMessage(m);
+
+    TrackCylinder::setIsPlaying(false);
+}
+
+//--------------------------------------------------------------
+void ofApp::changeTimeRes(int &timeResolution){
+    TrackCylinder::setTimeDistanceInPixels(timeResolution);
+}
+
+//--------------------------------------------------------------
+void ofApp::changeDrawingRes(int &audioSkipDistance){
+    audioInBufferSkip = audioSkipDistance;
+}
+
+//--------------------------------------------------------------
+void ofApp::abletonStateChanged(){
+    
 }
 
 
 //--------------------------------------------------------------
 void ofApp::audioIn(float * input, int bufferSize, int nChannels){
-    
-//    time.updateTime();
-    
-    //lets go through each sample
-    for (int i = 0; i < bufferSize; i++){
-        left1[i]	= input[i*nChannels+0]*0.9;
-        right1[i]	= input[i*nChannels+1]*0.9;
-        left2[i]	= input[i*nChannels+2]*0.9;
-        right2[i]	= input[i*nChannels+3]*0.9;
-//        left3[i]	= input[i*nChannels+4]*0.5;
-//        left4[i]	= input[i*nChannels+5]*0.5;
-//        left5[i]	= input[i*nChannels+6]*0.5;
-//        left6[i]	= input[i*nChannels+7]*0.5;
+    if (audioInBufferCount % (audioInBufferSkip-1) == 0) {
+        //    time.updateTime();
+        
+        //lets go through each sample
+        for (int i = 0; i < bufferSize; i++){
+            left1[i]	= input[i*nChannels+0]*0.9;
+            right1[i]	= input[i*nChannels+1]*0.9;
+            left2[i]	= input[i*nChannels+2]*0.9;
+            right2[i]	= input[i*nChannels+3]*0.9;
+            //        left3[i]	= input[i*nChannels+4]*0.5;
+            //        left4[i]	= input[i*nChannels+5]*0.5;
+            //        left5[i]	= input[i*nChannels+6]*0.5;
+            //        left6[i]	= input[i*nChannels+7]*0.5;
+        }
+        
+        fft->setSignal(left1);
+        currFft = fft->getAmplitude();
+        copy(currFft, currFft + fft->getBinSize(), fftL1.begin());
+        
+        fft->setSignal(right1);
+        currFft = fft->getAmplitude();
+        copy(currFft, currFft + fft->getBinSize(), fftR1.begin());
+        
+        fft->setSignal(left2);
+        currFft = fft->getAmplitude();
+        copy(currFft, currFft + fft->getBinSize(), fftL2.begin());
+        
+        fft->setSignal(right2);
+        currFft = fft->getAmplitude();
+        copy(currFft, currFft + fft->getBinSize(), fftR2.begin());
+        //
+        //
+        //    fft->setSignal(left3);
+        //    currFft = fft->getAmplitude();
+        //    copy(currFft, currFft + fft->getBinSize(), fftL3.begin());
+        //
+        //
+        //    fft->setSignal(left4);
+        //    currFft = fft->getAmplitude();
+        //    copy(currFft, currFft + fft->getBinSize(), fftL4.begin());
+        //
+        //
+        //    fft->setSignal(left5);
+        //    currFft = fft->getAmplitude();
+        //    copy(currFft, currFft + fft->getBinSize(), fftL5.begin());
+        //
+        //
+        //    fft->setSignal(left6);
+        //    currFft = fft->getAmplitude();
+        //    copy(currFft, currFft + fft->getBinSize(), fftL6.begin());
+        
+        //demoday
+        tracks[0].updateSpectrogram(fftL1, true);
+        tracks[1].updateSpectrogram(fftR1, true);
+        tracks[2].updateSpectrogram(fftL2, true);
+        tracks[3].updateSpectrogram(fftR2, true);
+        //    tracks[4].updateSpectrogram(fftL5);
+        //    tracks[5].updateSpectrogram(fftL6);
+        
     }
-    
-    fft->setSignal(left1);
-    currFft = fft->getAmplitude();
-    copy(currFft, currFft + fft->getBinSize(), fftL1.begin());
-    
-    fft->setSignal(right1);
-    currFft = fft->getAmplitude();
-    copy(currFft, currFft + fft->getBinSize(), fftR1.begin());
-    
-    fft->setSignal(left2);
-    currFft = fft->getAmplitude();
-    copy(currFft, currFft + fft->getBinSize(), fftL2.begin());
-    
-    fft->setSignal(right2);
-    currFft = fft->getAmplitude();
-    copy(currFft, currFft + fft->getBinSize(), fftR2.begin());
-//
-//    
-//    fft->setSignal(left3);
-//    currFft = fft->getAmplitude();
-//    copy(currFft, currFft + fft->getBinSize(), fftL3.begin());
-//
-//    
-//    fft->setSignal(left4);
-//    currFft = fft->getAmplitude();
-//    copy(currFft, currFft + fft->getBinSize(), fftL4.begin());
-//    
-//    
-//    fft->setSignal(left5);
-//    currFft = fft->getAmplitude();
-//    copy(currFft, currFft + fft->getBinSize(), fftL5.begin());
-//    
-//    
-//    fft->setSignal(left6);
-//    currFft = fft->getAmplitude();
-//    copy(currFft, currFft + fft->getBinSize(), fftL6.begin());
-    
-    //demoday
-    tracks[0].updateSpectrogram(fftL1, true);
-    tracks[1].updateSpectrogram(fftR1, true);
-    tracks[2].updateSpectrogram(fftL2, true);
-    tracks[3].updateSpectrogram(fftR2, true);
-//    tracks[4].updateSpectrogram(fftL5);
-//    tracks[5].updateSpectrogram(fftL6);
-
+    audioInBufferCount++;
 }
