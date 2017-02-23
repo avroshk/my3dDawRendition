@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<VariablesViewState
+   version = "1.0">
+   <ContextStates>
+      <ContextState
+         contextName = "ofApp::audioIn(float*, int, int):ofApp.cpp">
+         <PersistentStrings>
+            <PersistentString
+               value = "*(float (*)[256])input">
+            </PersistentString>
+         </PersistentStrings>
+      </ContextState>
+      <ContextState
+         contextName = "TrackCylinder::update(ofVec2f, ofCamera*):TrackCylinder.cpp">
+         <PersistentStrings>
+            <PersistentString
+               value = "panAngle">
+            </PersistentString>
+         </PersistentStrings>
+      </ContextState>
+      <ContextState
+         contextName = "TrackCylinder::getPrevTick(int):TrackCylinder.cpp">
+         <PersistentStrings>
+            <PersistentString
+               value = "tick">
+            </PersistentString>
+         </PersistentStrings>
+      </ContextState>
+      <ContextState
+         contextName = "TrackCylinder::isFocussed(ofVec2f, ofCamera*):TrackCylinder.cpp">
+      </ContextState>
+      <ContextState
+         contextName = "TrackCylinder::updateSpectrogram(std::__1::vector&lt;float, std::__1::allocator&lt;float&gt; &gt;, bool):TrackCylinder.cpp">
+         <PersistentStrings>
+            <PersistentString
+               value = "tick">
+            </PersistentString>
+         </PersistentStrings>
+      </ContextState>
+      <ContextState
+         contextName = "TimeLine::getMeasureInPixels():TimeLine.cpp">
+         <PersistentStrings>
+            <PersistentString
+               value = "ceil((measure[0]-1)*160 + (measure[1]-1)*40 + (measure[2]-1)*10 + measure[3]*0.1)">
+            </PersistentString>
+         </PersistentStrings>
+      </ContextState>
+   </ContextStates>
+</VariablesViewState>
